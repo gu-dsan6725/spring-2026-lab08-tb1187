@@ -175,7 +175,12 @@ uv run python test_client.py > output3.txt
 
 After completing the exercise, reflect on:
 1. How did the LLM know to call your new tool?
+ - The LLM relied on the tool's name and description to determine its purpose.
 2. What happens if the tool schema description is unclear?
+ - The LLM input to the function will not match the expected input and an error will occur.
 3. How does the agent decide between `compare_stocks` and `get_stock_price`?
+ - After implementing the compare_stocks tool I ran the first test and the agent initially called get_stock_price twice. I changed the description of compare_stocks to ensure that it was chosen over compare_stocks when two tickers are present and that worked. 
 4. How would you add validation for parameter values?
+ - Validation can be added by checking input formats and verifying that data exits for the tickers before proceeding.
 5. What if the user asks to compare 3 stocks instead of 2?
+ - The LLM would likely call get_stocks three times and compare their outputs. 

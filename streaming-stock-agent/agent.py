@@ -178,6 +178,44 @@ def _get_company_info(
             "ticker": ticker.upper()
         }
 
+def _compare_stocks(
+    symbol1: str,
+    symbol2: str
+) -> Dict[str, Any]:
+    """Compare two stocks side-by-side.
+
+    Args:
+        symbol1: First stock symbol (e.g., 'AAPL')
+        symbol2: Second stock symbol (e.g., 'MSFT')
+
+    Returns:
+        Dictionary with comparison data for both stocks
+    """
+    try:
+        stock1_data = _get_stock_price(symbol1)
+        stock2_data = _get_stock_price(symbol2)
+
+        return {
+            "comparison": {
+                "symbol1": symbol1.upper(),
+                "symbol2": symbol2.upper(),
+                "stock1": stock1_data,
+                "stock2": stock2_data
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Error comparing stocks {symbol1} vs {symbol2}: {e}")
+        return {
+            "error": str(e),
+            "comparison": {
+                "symbol1": symbol1.upper(),
+                "symbol2": symbol2.upper()
+            }
+        }
+
+
+
 
 # Tool definitions for Strands agent
 STOCK_TOOLS = [
@@ -230,6 +268,25 @@ STOCK_TOOLS = [
             "required": ["ticker"]
         },
         "function": _get_company_info
+    },
+    {
+        "name": "compare_stocks",
+        "description": "Compare two stock tickers side-by-side in a single tool call, including current price, company name, and market capitalization. Use this whenever the user asks to compare, contrast, evaluate, or see differences between two stocks or companies. Prefer this tool over calling get_stock_price multiple times.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "symbol1": {
+                    "type": "string",
+                    "description": "First stock symbol to compare"
+                },
+                "symbol2": {
+                    "type": "string",
+                    "description": "Second stock symbol to compare"
+                }
+            },
+            "required": ["symbol1", "symbol2"]
+        },
+        "function": _compare_stocks
     }
 ]
 

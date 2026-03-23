@@ -1,0 +1,63 @@
+Testing /ping endpoint...
+Status: 200
+Response: {'status': 'ok'}
+
+============================================================
+MULTI-TURN CONVERSATION TEST
+============================================================
+
+Session: test_session_123
+Query: What is the current price of Apple stock?
+------------------------------------------------------------
+
+[Tool calls starting...]
+
+[Calling tool: get_stock_price with args {'ticker': 'AAPL'}]
+[Tool calls completed]
+
+The current price of Apple Inc. (AAPL) is **$253.77**, as of March 23, 2026, 1:43 PM EDT. This reflects a **+2.33% increase** from the previous close of $247.99, with the market in a regular trading session.
+
+*Data sourced from Yahoo Finance (prices may have a slight delay).*
+[Done]
+
+============================================================
+
+Session: test_session_123
+Query: How has it changed in the last 30 days?
+------------------------------------------------------------
+
+[Tool calls starting...]
+
+[Calling tool: get_stock_history with args {'days': 30, 'ticker': 'AAPL'}]
+[Tool calls completed]
+
+Over the last 30 days (February 23, 2026 – March 23, 2026), Apple (AAPL) stock has **decreased by 4.68%** ($12.47 per share). 
+
+- **Starting price**: $266.18  
+- **Ending price**: $253.71  
+- **High**: $276.11  
+- **Low**: $246.00  
+- **Average daily volume**: 39.8 million shares  
+
+The stock initially declined sharply in early March but has since rebounded slightly. The current price of **$253.77** is slightly above the 30-day low but below the 30-day starting value.  
+
+*Data sourced from Yahoo Finance (prices may have a slight delay).*
+[Done]
+
+============================================================
+
+Session: test_session_123
+Query: What about Tesla?
+------------------------------------------------------------
+
+[Tool calls starting...]
+
+[Calling tool: get_stock_price with args {'ticker': 'TSLA'}]
+[Tool calls completed]
+
+
+[Error: litellm.RateLimitError: RateLimitError: GroqException - {"error":{"message":"Rate limit reached for model `qwen/qwen3-32b` in organization `org_01kesrcedsf1ebzn5whj099v1m` service tier `on_demand` on tokens per minute (TPM): Limit 6000, Used 5651, Requested 1352. Please try again in 10.03s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing","type":"tokens","code":"rate_limit_exceeded"}}
+]
+
+============================================================
+

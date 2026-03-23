@@ -1,0 +1,24 @@
+Session: cli_session
+Query: Compare AAPL and MSFT
+------------------------------------------------------------
+
+[Tool calls starting...]
+
+[Calling tool: compare_stocks with args {'symbol1': 'AAPL', 'symbol2': 'MSFT'}]
+[Tool calls completed]
+
+As of March 23, 2026 (1:41 PM ET) from Yahoo Finance:
+
+**Apple Inc. (AAPL)**  
+- Current price: $253.60  
+- Change: **+2.26%** (+$5.61)  
+
+**Microsoft Corporation (MSFT)**  
+- Current price: $385.00  
+- Change: **+0.82%** (+$3.15)  
+
+Apple shows stronger performance in percentage terms, while Microsoft has higher market exposure given its larger price. Both stocks are in the technology sector but focus on different markets (consumer electronics vs. enterprise software). Would you like additional metrics (e.g., market cap, volume)?
+[Done]
+
+============================================================
+
