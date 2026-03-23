@@ -260,8 +260,14 @@ async def _fetch_financial_data(
         if not final_text:
             raise RuntimeError("No response returned from Claude Agent SDK")
 
+        # Strip markdown code fences if Claude wrapped the response
+        stripped = final_text.strip()
+        if stripped.startswith("```"):
+            stripped = stripped.split("\n", 1)[-1]
+            stripped = stripped.rsplit("```", 1)[0].strip()
+
         try:
-            return json.loads(final_text)
+            return json.loads(stripped)
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse JSON response: {final_text}")
             raise ValueError(f"Tool response was not valid JSON: {e}") from e
@@ -423,8 +429,8 @@ async def _run_orchestrator(
         system_prompt=_load_prompt("orchestrator_system_prompt.txt"),
         mcp_servers=mcp_servers,
         agents=agents,
-        can_use_tool=_auto_approve_all,
-        cwd=str(working_dir)
+        permission_mode="bypassPermissions",
+        cwd=str(working_dir),
     )
 
     # Step 5: Run orchestrator with Claude Agent SDK
@@ -453,10 +459,14 @@ async def _run_orchestrator(
     # Step 5: Run orchestrator with Claude Agent SDK
     prompt = f"""Analyze my financial data and {user_query}
 
-    I have:
-    - {len(bank_transactions)} bank transactions
-    - {len(credit_card_transactions)} credit card transactions
-    - {len(subscriptions)} identified subscriptions
+    Account details:
+    - Username: {username}
+    - Date range: {start_date} to {end_date}
+
+    I have already fetched and saved the raw data:
+    - {len(bank_transactions)} bank transactions (saved to data/raw_data/bank_transactions.json)
+    - {len(credit_card_transactions)} credit card transactions (saved to data/raw_data/credit_card_transactions.json)
+    - {len(subscriptions)} identified subscriptions: {json.dumps(subscriptions)}
 
     Please:
     1. Identify opportunities for savings
@@ -467,7 +477,9 @@ async def _run_orchestrator(
     """
 
     async with ClaudeSDKClient(options=options) as client:
-        async for message in client.query(prompt):
+        await client.query(prompt)
+
+        async for message in client.receive_response():
             if isinstance(message, AssistantMessage):
                 for block in message.content:
                     if isinstance(block, TextBlock):
