@@ -11,9 +11,26 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
+from collections import defaultdict
+from typing import Any
 
-from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions, AgentDefinition
+from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions, AgentDefinition, query, AssistantMessage, ResultMessage, TextBlock
 
+# Helper function
+def _load_prompt(filename: str) -> str:
+    """Load prompt from prompts directory."""
+    prompt_path = Path(__file__).parent / "prompts" / filename
+    return prompt_path.read_text()
+
+async def _auto_approve_all(
+    tool_name: str,
+    input_data: dict,
+    context
+):
+    """Auto-approve all tools without prompting."""
+    logger.debug(f"Auto-approving tool: {tool_name}")
+    from claude_agent_sdk import PermissionResultAllow
+    return PermissionResultAllow()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -66,9 +83,114 @@ def _detect_subscriptions(
     """
     subscriptions = []
 
-    # TODO: Implement subscription detection logic
-    # Hint: Look for transactions with recurring=True
-    # Hint: Subscriptions are typically negative amounts (outflows)
+    def _parse_date(date_str: str) -> datetime | None:
+        """Try a few common date formats."""
+        if not date_str:
+            return None
+
+        formats = [
+            "%Y-%m-%d",
+            "%m/%d/%Y",
+            "%Y/%m/%d",
+            "%Y-%m-%d %H:%M:%S",
+        ]
+
+        for fmt in formats:
+            try:
+                return datetime.strptime(date_str, fmt)
+            except (ValueError, TypeError):
+                continue
+        return None
+
+    def _extract_service_name(txn: dict) -> str:
+        """Extract a likely service/merchant name from transaction fields."""
+        return (
+            txn.get("merchant")
+            or txn.get("description")
+            or txn.get("name")
+            or txn.get("payee")
+            or "Unknown Service"
+        )
+
+    def _detect_frequency(dates: list[datetime]) -> str:
+        """Estimate billing frequency from transaction dates."""
+        if len(dates) < 2:
+            return "monthly"
+
+        dates = sorted(dates)
+        day_gaps = [
+            (dates[i] - dates[i - 1]).days
+            for i in range(1, len(dates))
+        ]
+
+        if not day_gaps:
+            return "monthly"
+
+        avg_gap = sum(day_gaps) / len(day_gaps)
+
+        if 25 <= avg_gap <= 35:
+            return "monthly"
+        if 6 <= avg_gap <= 8:
+            return "weekly"
+        if 12 <= avg_gap <= 16:
+            return "biweekly"
+        if 80 <= avg_gap <= 100:
+            return "quarterly"
+        if 350 <= avg_gap <= 380:
+            return "yearly"
+
+        return "monthly"
+
+    def _normalize_amount(amount: Any) -> float | None:
+        """Convert amount to float if possible."""
+        try:
+            return float(amount)
+        except (TypeError, ValueError):
+            return None
+
+    all_transactions = bank_transactions + credit_card_transactions
+
+    # Group candidate recurring outflows by service name
+    grouped = defaultdict(list)
+
+    for txn in all_transactions:
+        recurring = txn.get("recurring", False)
+        amount = _normalize_amount(txn.get("amount"))
+
+        # Subscriptions are typically recurring negative outflows
+        if not recurring or amount is None or amount >= 0:
+            continue
+
+        service = _extract_service_name(txn).strip()
+        grouped[service].append(txn)
+
+    subscriptions = []
+
+    for service, txns in grouped.items():
+        amounts = []
+        dates = []
+
+        for txn in txns:
+            amt = _normalize_amount(txn.get("amount"))
+            if amt is not None:
+                amounts.append(abs(amt))
+
+            parsed_date = _parse_date(txn.get("date"))
+            if parsed_date:
+                dates.append(parsed_date)
+
+        if not amounts:
+            continue
+
+        # Use average absolute charge in case there are small tax/price differences
+        avg_amount = round(sum(amounts) / len(amounts), 2)
+        frequency = _detect_frequency(dates)
+
+        subscriptions.append({
+            "service": service,
+            "amount": avg_amount,
+            "frequency": frequency
+        })
 
     return subscriptions
 
@@ -109,11 +231,66 @@ async def _fetch_financial_data(
     #     }
     # }
 
-    # TODO: Call MCP tools to fetch data
-    bank_data = {}  # Placeholder
-    credit_card_data = {}  # Placeholder
+    mcp_servers = {
+        "Bank Account Server": {
+            "type": "http",
+            "url": "http://127.0.0.1:5001/mcp"
+        },
+        "Credit Card Server": {
+            "type": "http",
+            "url": "http://127.0.0.1:5002/mcp"
+        }
+    }
 
-    # Save raw data
+    async def _run_tool_prompt(prompt: str) -> dict:
+        """Run a prompt through Claude Agent SDK and parse final JSON response."""
+        options = ClaudeAgentOptions(
+            mcp_servers=mcp_servers,
+            permission_mode="bypassPermissions"
+        )
+
+        final_text = ""
+
+        async for message in query(prompt=prompt, options=options):
+            if isinstance(message, AssistantMessage):
+                for block in message.content:
+                    if isinstance(block, TextBlock):
+                        final_text += block.text
+
+        if not final_text:
+            raise RuntimeError("No response returned from Claude Agent SDK")
+
+        try:
+            return json.loads(final_text)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse JSON response: {final_text}")
+            raise ValueError(f"Tool response was not valid JSON: {e}") from e
+
+    bank_prompt = f"""
+Use the MCP tool get_bank_transactions from the Bank Account Server.
+
+Arguments:
+- username: "{username}"
+- start_date: "{start_date}"
+- end_date: "{end_date}"
+
+Return only the raw JSON response from the tool and nothing else.
+""".strip()
+
+    credit_card_prompt = f"""
+Use the MCP tool get_credit_card_transactions from the Credit Card Server.
+
+Arguments:
+- username: "{username}"
+- start_date: "{start_date}"
+- end_date: "{end_date}"
+
+Return only the raw JSON response from the tool and nothing else.
+""".strip()
+
+    bank_data = await _run_tool_prompt(bank_prompt)
+    credit_card_data = await _run_tool_prompt(credit_card_prompt)
+
     _save_json(bank_data, "bank_transactions.json")
     _save_json(credit_card_data, "credit_card_transactions.json")
 
@@ -181,11 +358,39 @@ async def _run_orchestrator(
     #     model="haiku"  # Fast and cheap for research
     # )
 
+    # Step 3: Define sub-agents
+    research_agent = AgentDefinition(
+        description="Research cheaper alternatives for subscriptions and services",
+        prompt=_load_prompt("research_agent_prompt.txt"),
+        tools=["write"],
+        model="haiku"
+    )
+
+    negotiation_agent = AgentDefinition(
+        description="Create negotiation strategies and scripts for bills and services",
+        prompt=_load_prompt("negotiation_agent_prompt.txt"),
+        tools=["write"],
+        model="haiku"
+    )
+
+    tax_agent = AgentDefinition(
+        description="Identify tax-deductible expenses and optimization opportunities",
+        prompt=_load_prompt("tax_agent_prompt.txt"),
+        tools=["write"],
+        model="haiku"
+    )
+
     agents = {
-        # "research_agent": research_agent,
-        # "negotiation_agent": negotiation_agent,
-        # "tax_agent": tax_agent,
+        "research_agent": research_agent,
+        "negotiation_agent": negotiation_agent,
+        "tax_agent": tax_agent,
     }
+
+    # agents = {
+    #     # "research_agent": research_agent,
+    #     # "negotiation_agent": negotiation_agent,
+    #     # "tax_agent": tax_agent,
+    # }
 
     # Step 4: Configure orchestrator agent with sub-agents
     # TODO: Create ClaudeAgentOptions with agents and MCP servers
@@ -198,6 +403,29 @@ async def _run_orchestrator(
     #     agents=agents,
     #     # Add MCP server configurations here
     # )
+
+    # Step 4: Configure orchestrator agent with sub-agents
+    mcp_servers = {
+        "Bank Account Server": {
+            "type": "http",
+            "url": "http://127.0.0.1:5001/mcp"
+        },
+        "Credit Card Server": {
+            "type": "http",
+            "url": "http://127.0.0.1:5002/mcp"
+        }
+    }
+
+    working_dir = Path(__file__).parent.parent  # personal-financial-analyst/
+
+    options = ClaudeAgentOptions(
+        model="sonnet",
+        system_prompt=_load_prompt("orchestrator_system_prompt.txt"),
+        mcp_servers=mcp_servers,
+        agents=agents,
+        can_use_tool=_auto_approve_all,
+        cwd=str(working_dir)
+    )
 
     # Step 5: Run orchestrator with Claude Agent SDK
     # TODO: Use ClaudeSDKClient to run the orchestration
@@ -222,8 +450,36 @@ async def _run_orchestrator(
     #         if message.type == "assistant":
     #             print(message.content)
 
+    # Step 5: Run orchestrator with Claude Agent SDK
+    prompt = f"""Analyze my financial data and {user_query}
+
+    I have:
+    - {len(bank_transactions)} bank transactions
+    - {len(credit_card_transactions)} credit card transactions
+    - {len(subscriptions)} identified subscriptions
+
+    Please:
+    1. Identify opportunities for savings
+    2. Delegate research to the research agent
+    3. Delegate negotiation strategies to the negotiation agent
+    4. Delegate tax analysis to the tax agent
+    5. Read their results and create a final report at data/final_report.md
+    """
+
+    async with ClaudeSDKClient(options=options) as client:
+        async for message in client.query(prompt):
+            if isinstance(message, AssistantMessage):
+                for block in message.content:
+                    if isinstance(block, TextBlock):
+                        print(block.text, end="", flush=True)
+
+            elif isinstance(message, ResultMessage):
+                logger.info(f"Duration: {message.duration_ms}ms")
+                logger.info(f"Cost: ${message.total_cost_usd:.4f}")
+                break
+
     # Step 6: Generate final report
-    logger.info("Orchestration complete. Check data/final_report.txt for results.")
+    logger.info("Orchestration complete. Check data/final_report.md for results.")
 
 
 def _parse_args() -> argparse.Namespace:
